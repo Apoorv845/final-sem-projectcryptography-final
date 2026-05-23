@@ -1,6 +1,7 @@
 import base64
 import os
 import io
+import time
 import uvicorn
 from typing import Union
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -15,15 +16,15 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidSignature
 
 # Initialize the App
-app = FastAPI(title="6-Layer Crypto API", version="1.4.0")
+app = FastAPI(title="6-Layer Crypto API", version="1.6.0")
 
 # Enable CORS for cross-device API access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins (good for local network testing)
+    allow_origins=["*"],  
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],  
+    allow_headers=["*"],  
 )
 
 # ==========================================
@@ -54,7 +55,7 @@ class NodeAuth:
 auth_tool = NodeAuth()
 
 # ==========================================
-# UI HTML CONTENT (Upgraded UX)
+# UI HTML CONTENT
 # ==========================================
 
 HTML_CONTENT = """
@@ -65,8 +66,8 @@ HTML_CONTENT = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Advanced Crypto Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* Custom scrollbar for textareas handling large data */
         textarea::-webkit-scrollbar { width: 8px; }
         textarea::-webkit-scrollbar-track { background: #1e293b; border-radius: 4px; }
         textarea::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
@@ -78,11 +79,16 @@ HTML_CONTENT = """
     <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2"></div>
 
     <div class="max-w-5xl mx-auto space-y-8">
-        <header class="border-b border-slate-800 pb-6 mb-8">
-            <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
-                Advanced Crypto Studio
-            </h1>
-            <p class="text-slate-400 mt-2">Enterprise-grade symmetric encryption and ECDSA file authentication.</p>
+        <header class="border-b border-slate-800 pb-6 mb-8 flex justify-between items-end">
+            <div>
+                <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
+                    Advanced Crypto Studio
+                </h1>
+                <p class="text-slate-400 mt-2">Enterprise-grade encryption and ECDSA authentication.</p>
+            </div>
+            <div class="text-xs text-slate-500 font-mono bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
+                Performance Analytics: <span class="text-emerald-400">Active</span>
+            </div>
         </header>
         
         <section class="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
@@ -113,7 +119,10 @@ HTML_CONTENT = """
                 <div class="flex flex-col h-full">
                     <div class="flex justify-between items-end mb-1">
                         <label class="block text-xs font-medium text-slate-400">Result Output</label>
-                        <button onclick="copyContent('symOut')" class="text-xs text-slate-400 hover:text-white transition">Copy Result</button>
+                        <div class="flex gap-3">
+                            <span id="symPerf" class="text-xs text-emerald-400 font-mono hidden"></span>
+                            <button onclick="copyContent('symOut')" class="text-xs text-slate-400 hover:text-white transition">Copy Result</button>
+                        </div>
                     </div>
                     <div id="symOut" class="flex-1 p-4 bg-slate-950 rounded-lg border border-slate-800 text-cyan-300 font-mono text-sm break-all overflow-y-auto whitespace-pre-wrap"></div>
                 </div>
@@ -123,6 +132,7 @@ HTML_CONTENT = """
         <section class="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
             <div class="bg-slate-800/50 px-6 py-4 border-b border-slate-800 flex justify-between items-center">
                 <h2 class="text-xl font-semibold text-purple-400">2. Identity & Keys (ECDSA)</h2>
+                <span id="keyPerf" class="text-xs text-emerald-400 font-mono hidden bg-emerald-500/10 px-2 py-1 rounded"></span>
             </div>
             <div class="p-6 space-y-6">
                 <div class="flex flex-col md:flex-row gap-4 items-end">
@@ -154,7 +164,7 @@ HTML_CONTENT = """
             </div>
         </section>
 
-        <section class="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden mb-12">
+        <section class="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
             <div class="bg-slate-800/50 px-6 py-4 border-b border-slate-800">
                 <h2 class="text-xl font-semibold text-pink-400">3. File Integrity Engine</h2>
             </div>
@@ -179,7 +189,7 @@ HTML_CONTENT = """
                     </div>
                 </div>
 
-                <div class="space-y-4 bg-slate-950/50 p-6 rounded-xl border border-slate-800">
+                <div class="space-y-4 bg-slate-950/50 p-6 rounded-xl border border-slate-800 relative">
                     <p class="text-sm text-slate-400 mb-4">Ensure your keys and password are filled out in Section 2 before proceeding.</p>
                     
                     <button onclick="signFile()" class="w-full bg-pink-600 hover:bg-pink-500 text-white font-medium py-3 rounded-lg transition shadow-lg shadow-pink-900/20 flex justify-center items-center gap-2">
@@ -190,25 +200,88 @@ HTML_CONTENT = """
                         <span>🛡️</span> 2. Verify Authenticity
                     </button>
 
-                    <div id="fileResult" class="mt-6 p-4 rounded-lg text-center font-bold text-lg hidden border"></div>
+                    <div id="fileResult" class="mt-6 p-4 rounded-lg text-center font-bold text-lg hidden border whitespace-pre-line"></div>
                 </div>
+            </div>
+        </section>
+
+        <section class="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden mb-12">
+            <div class="bg-slate-800/50 px-6 py-4 border-b border-slate-800">
+                <h2 class="text-xl font-semibold text-amber-400">4. Live Performance Graph</h2>
+            </div>
+            <div class="p-6">
+                <canvas id="perfChart" height="80"></canvas>
             </div>
         </section>
     </div>
 
     <script>
+        // --- Chart.js Setup ---
+        const ctx = document.getElementById('perfChart').getContext('2d');
+        const perfChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], // Time labels
+                datasets: [{
+                    label: 'Execution Time (ms)',
+                    data: [], // Execution time data
+                    borderColor: '#fbbf24', // Amber color
+                    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointBackgroundColor: '#f59e0b',
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        grid: { color: '#334155' }, 
+                        ticks: { color: '#94a3b8' },
+                        title: { display: true, text: 'Milliseconds (ms)', color: '#64748b' }
+                    },
+                    x: { 
+                        grid: { color: '#334155' }, 
+                        ticks: { color: '#94a3b8' } 
+                    }
+                },
+                plugins: {
+                    legend: { labels: { color: '#cbd5e1' } }
+                }
+            }
+        });
+
+        function plotPerformance(operationName, timeMs) {
+            const now = new Date();
+            const timeStr = String(now.getHours()).padStart(2, '0') + ':' + 
+                            String(now.getMinutes()).padStart(2, '0') + ':' + 
+                            String(now.getSeconds()).padStart(2, '0');
+            
+            perfChart.data.labels.push(`${operationName} (${timeStr})`);
+            perfChart.data.datasets[0].data.push(timeMs);
+            
+            // Keep graph tidy by showing only the last 15 actions
+            if (perfChart.data.labels.length > 15) {
+                perfChart.data.labels.shift();
+                perfChart.data.datasets[0].data.shift();
+            }
+            perfChart.update();
+        }
+
         // --- UI Helpers ---
         function showToast(message, type="success") {
             const toast = document.createElement('div');
             const color = type === "error" ? "bg-red-500" : "bg-emerald-500";
             toast.className = `${color} text-white px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 translate-x-full opacity-0 flex items-center gap-2 font-medium text-sm`;
-            toast.innerText = message;
+            toast.innerHTML = message;
             
             const container = document.getElementById('toast-container');
             container.appendChild(toast);
             
             setTimeout(() => { toast.classList.remove('translate-x-full', 'opacity-0'); }, 10);
-            
             setTimeout(() => {
                 toast.classList.add('opacity-0');
                 setTimeout(() => toast.remove(), 300);
@@ -235,13 +308,20 @@ HTML_CONTENT = """
             if(file) display.innerText = `Selected: ${file.name}`;
         }
 
+        function showPerf(elementId, timeMs) {
+            const el = document.getElementById(elementId);
+            el.innerText = `⏱️ ${timeMs} ms`;
+            el.classList.remove('hidden');
+        }
+
         // --- API Calls ---
         async function genSymKey() {
             try {
                 const r = await fetch('/encryption/generate-key');
                 const d = await r.json();
                 document.getElementById('symKey').value = d.key;
-                showToast("New Symmetric Key Generated");
+                plotPerformance('Gen Sym Key', d.time_ms);
+                showToast(`New Key Generated <span class="ml-2 bg-black/20 px-2 py-0.5 rounded text-xs">⏱️ ${d.time_ms}ms</span>`);
             } catch(e) { showToast("Error generating key", "error"); }
         }
 
@@ -255,7 +335,9 @@ HTML_CONTENT = """
                 if(r.ok) {
                     document.getElementById('symOut').innerText = d.encrypted_data;
                     document.getElementById('symOut').className = "flex-1 p-4 bg-slate-950 rounded-lg border border-slate-800 text-cyan-300 font-mono text-sm break-all overflow-y-auto whitespace-pre-wrap";
-                    showToast("Encryption Successful");
+                    showPerf('symPerf', d.time_ms);
+                    plotPerformance('Encrypt Data', d.time_ms);
+                    showToast(`Encryption Successful <span class="ml-2 bg-black/20 px-2 py-0.5 rounded text-xs">⏱️ ${d.time_ms}ms</span>`);
                 } else { throw new Error(d.detail); }
             } catch(e) { 
                 document.getElementById('symOut').innerText = e.message;
@@ -273,7 +355,9 @@ HTML_CONTENT = """
                 if(r.ok) {
                     document.getElementById('symOut').innerText = d.decrypted_data;
                     document.getElementById('symOut').className = "flex-1 p-4 bg-slate-950 rounded-lg border border-slate-800 text-emerald-300 font-mono text-sm break-all overflow-y-auto whitespace-pre-wrap";
-                    showToast("Decryption Successful");
+                    showPerf('symPerf', d.time_ms);
+                    plotPerformance('Decrypt Data', d.time_ms);
+                    showToast(`Decryption Successful <span class="ml-2 bg-black/20 px-2 py-0.5 rounded text-xs">⏱️ ${d.time_ms}ms</span>`);
                 } else { throw new Error(d.detail); }
             } catch(e) { 
                 document.getElementById('symOut').innerText = "Failed: Check your key and cipher formatting.";
@@ -290,7 +374,9 @@ HTML_CONTENT = """
                 const d = await r.json();
                 document.getElementById('pubKey').value = d.public_key_pem;
                 document.getElementById('privKey').value = d.private_key_pem;
-                showToast("Identity Keys Generated");
+                showPerf('keyPerf', d.time_ms);
+                plotPerformance('Gen ECDSA Keys', d.time_ms);
+                showToast(`Identity Keys Generated <span class="ml-2 bg-black/20 px-2 py-0.5 rounded text-xs">⏱️ ${d.time_ms}ms</span>`);
             } catch(e) { showToast("Failed to generate keys", "error"); }
         }
 
@@ -308,12 +394,12 @@ HTML_CONTENT = """
             fd.append('private_key_password', pass);
             
             try {
-                showToast("Processing Signature...");
                 const r = await fetch('/auth/sign-file', {method: 'POST', body: fd});
                 const d = await r.json();
                 if(r.ok) {
                     document.getElementById('sigHex').value = d.signature_hex;
-                    showToast("File Signed Successfully!");
+                    plotPerformance('Sign File', d.time_ms);
+                    showToast(`File Signed Successfully! <span class="ml-2 bg-black/20 px-2 py-0.5 rounded text-xs">⏱️ ${d.time_ms}ms</span>`);
                 } else { throw new Error(d.detail); }
             } catch(e) { showToast("Signing failed: " + e.message, "error"); }
         }
@@ -337,12 +423,14 @@ HTML_CONTENT = """
                 const resEl = document.getElementById('fileResult');
                 resEl.classList.remove('hidden');
                 
+                plotPerformance('Verify File', d.time_ms);
+
                 if(d.is_valid) {
-                    resEl.innerText = "✅ FILE IS AUTHENTIC AND UNTAMPERED";
+                    resEl.innerHTML = `✅ FILE IS AUTHENTIC AND UNTAMPERED<br><span class="text-sm font-mono opacity-70 mt-2 block">⏱️ Verification Time: ${d.time_ms} ms</span>`;
                     resEl.className = "mt-6 p-4 rounded-lg text-center font-bold text-lg border border-emerald-500/50 bg-emerald-500/10 text-emerald-400 tracking-wide";
                     showToast("Verification Passed");
                 } else {
-                    resEl.innerText = "❌ CORRUPTED OR INVALID SIGNATURE";
+                    resEl.innerHTML = `❌ CORRUPTED OR INVALID SIGNATURE<br><span class="text-sm font-mono opacity-70 mt-2 block">⏱️ Verification Time: ${d.time_ms} ms</span>`;
                     resEl.className = "mt-6 p-4 rounded-lg text-center font-bold text-lg border border-red-500/50 bg-red-500/10 text-red-400 tracking-wide shadow-[0_0_15px_rgba(239,68,68,0.2)]";
                     showToast("Verification Failed", "error");
                 }
@@ -364,7 +452,10 @@ def serve_ui():
 
 @app.get("/encryption/generate-key")
 def generate_key():
-    return {"key": Fernet.generate_key().decode()}
+    start_time = time.perf_counter()
+    key = Fernet.generate_key().decode()
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    return {"key": key, "time_ms": elapsed_ms}
 
 class EnDecryptRequest(BaseModel):
     key: str
@@ -372,43 +463,79 @@ class EnDecryptRequest(BaseModel):
 
 @app.post("/encryption/encrypt")
 def encrypt_data_endpoint(req: EnDecryptRequest):
+    start_time = time.perf_counter()
     try:
         f = Fernet(req.key.encode())
-        return {"encrypted_data": f.encrypt(req.data.encode()).decode()}
+        encrypted = f.encrypt(req.data.encode()).decode()
+        elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return {"encrypted_data": encrypted, "time_ms": elapsed_ms}
     except Exception: 
         raise HTTPException(status_code=400, detail="Invalid Key/Data")
 
 @app.post("/encryption/decrypt")
 def decrypt_data_endpoint(req: EnDecryptRequest):
+    start_time = time.perf_counter()
     try:
         f = Fernet(req.key.encode())
-        return {"decrypted_data": f.decrypt(req.data.encode()).decode()}
+        decrypted = f.decrypt(req.data.encode()).decode()
+        elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return {"decrypted_data": decrypted, "time_ms": elapsed_ms}
     except Exception: 
         raise HTTPException(status_code=400, detail="Decryption Failed")
 
 @app.post("/auth/generate-keys")
 def generate_auth_keys(password: str):
+    start_time = time.perf_counter()
     priv, pub = auth_tool.generate_key_pair()
+    
+    priv_pem = priv.private_bytes(
+        serialization.Encoding.PEM, 
+        serialization.PrivateFormat.PKCS8, 
+        serialization.BestAvailableEncryption(password.encode())
+    ).decode()
+    
+    pub_pem = pub.public_bytes(
+        serialization.Encoding.PEM, 
+        serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+    
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    
     return {
-        "private_key_pem": priv.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.BestAvailableEncryption(password.encode())).decode(),
-        "public_key_pem": pub.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+        "private_key_pem": priv_pem,
+        "public_key_pem": pub_pem,
+        "time_ms": elapsed_ms
     }
 
 @app.post("/auth/sign-file")
 async def sign_file(private_key_pem: str = Form(...), private_key_password: str = Form(...), file: UploadFile = File(...)):
+    start_time = time.perf_counter()
     fb = await file.read()
-    pk = serialization.load_pem_private_key(private_key_pem.encode(), password=private_key_password.encode())
-    return {"signature_hex": auth_tool.sign_data(pk, fb).hex()}
+    
+    pk = serialization.load_pem_private_key(
+        private_key_pem.encode(), 
+        password=private_key_password.encode()
+    )
+    sig_hex = auth_tool.sign_data(pk, fb).hex()
+    
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    
+    return {"signature_hex": sig_hex, "time_ms": elapsed_ms}
 
 @app.post("/auth/verify-file")
 async def verify_file(public_key_pem: str = Form(...), signature_hex: str = Form(...), file: UploadFile = File(...)):
+    start_time = time.perf_counter()
     fb = await file.read()
+    
     pbk = serialization.load_pem_public_key(public_key_pem.encode())
-    return {"is_valid": auth_tool.verify_signature(pbk, fb, bytes.fromhex(signature_hex))}
+    is_valid = auth_tool.verify_signature(pbk, fb, bytes.fromhex(signature_hex))
+    
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    
+    return {"is_valid": is_valid, "time_ms": elapsed_ms}
 
 # ==========================================
-# SERVER RUNNER (Enables Multi-Device Access)
+# SERVER RUNNER
 # ==========================================
 if __name__ == "__main__":
-    # Host 0.0.0.0 binds to all network interfaces so other devices can access it
     uvicorn.run(app, host="0.0.0.0", port=8000)
